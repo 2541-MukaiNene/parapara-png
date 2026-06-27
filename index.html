@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3f0e8" />
+    <title>ぱらぱらPNG — PNG・APNG変換ツール</title>
+    <meta name="description" content="複数PNGからAPNGを作成、APNGからGIFへ変換。画像は外部に送信されません。" />
+    <link rel="stylesheet" href="styles.css?v=5" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="ぱらぱらPNG ホーム">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>ぱらぱらPNG</span>
+      </a>
+      <div class="local-badge"><span></span>ブラウザ内で完結</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">PNG → ANIMATED PNG</p>
+        <h1>静止画を、<br /><em>ぱらぱら動かそう。</em></h1>
+        <p class="lead">複数のPNGを重ねて、なめらかなAPNGに。<br />アップロード不要、登録不要、ぜんぶこの場で。</p>
+      </section>
+
+      <section class="studio" aria-label="APNG作成ツール">
+        <div class="upload-panel">
+          <div id="dropZone" class="drop-zone">
+            <input id="fileInput" type="file" accept="image/png" multiple hidden />
+            <div class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 64 64" fill="none"><path d="M32 43V17m0 0L21 28m11-11 11 11"/><path d="M14 40v8h36v-8"/></svg>
+            </div>
+            <strong>PNGをここにドロップ</strong>
+            <span>または</span>
+            <button id="selectButton" class="text-button" type="button">ファイルを選ぶ</button>
+            <small>複数選択できます</small>
+          </div>
+
+          <div id="workspace" class="workspace" hidden>
+            <div class="section-heading">
+              <div>
+                <span class="step">01</span>
+                <h2>フレーム</h2>
+              </div>
+              <div class="frame-actions">
+                <button id="clearButton" class="quiet-button" type="button">すべて削除</button>
+                <button id="addButton" class="outline-button" type="button"><span>＋</span> 画像を追加</button>
+              </div>
+            </div>
+            <p class="hint">ドラッグで順番を入れ替えられます</p>
+            <div id="frameList" class="frame-list"></div>
+          </div>
+        </div>
+
+        <aside class="settings-panel">
+          <div class="preview-wrap">
+            <div class="preview-topline">
+              <span>PREVIEW</span>
+              <span id="previewStatus">待機中</span>
+            </div>
+            <div class="preview-stage checkerboard">
+              <canvas id="previewCanvas" width="420" height="280"></canvas>
+              <div id="emptyPreview" class="empty-preview"><span>PNG</span><small>ここにプレビュー</small></div>
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="section-heading compact">
+              <div><span class="step">02</span><h2>動きの設定</h2></div>
+            </div>
+            <label class="control-row" for="delayInput">
+              <span><strong>フレーム間隔</strong><small>画像1枚あたりの表示時間</small></span>
+              <span class="number-field"><input id="delayInput" type="number" min="20" max="5000" step="10" value="200" /><b>ms</b></span>
+            </label>
+            <label class="control-row" for="loopInput">
+              <span><strong>ループ回数</strong><small>0にするとずっと繰り返し</small></span>
+              <span class="number-field"><input id="loopInput" type="number" min="0" max="999" step="1" value="0" /><b>回</b></span>
+            </label>
+
+            <div id="summary" class="summary" hidden>
+              <span><b id="frameCount">0</b> フレーム</span>
+              <i></i>
+              <span id="dimensions">—</span>
+              <i></i>
+              <span id="duration">— 秒</span>
+            </div>
+
+            <button id="convertButton" class="convert-button" type="button" disabled>
+              <span id="convertLabel">APNGに変換する</span>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+            </button>
+            <p id="message" class="message" role="status" aria-live="polite">PNGを2枚以上追加してください</p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="gif-section" aria-labelledby="gifHeading">
+        <div class="section-intro">
+          <p class="eyebrow">ANIMATED PNG → GIF</p>
+          <h2 id="gifHeading">APNGを、<em>GIFに変換。</em></h2>
+          <p>動きと速さはそのまま。APNGを選ぶだけでGIFに変換できます。</p>
+        </div>
+
+        <div class="gif-studio">
+          <div id="gifDropZone" class="gif-drop-zone">
+            <input id="gifFileInput" type="file" accept="image/png,.apng" hidden />
+            <div id="gifEmpty" class="gif-empty">
+              <div class="upload-icon small" aria-hidden="true">
+                <svg viewBox="0 0 64 64" fill="none"><path d="M32 43V17m0 0L21 28m11-11 11 11"/><path d="M14 40v8h36v-8"/></svg>
+              </div>
+              <strong>APNGをここにドロップ</strong>
+              <span>または</span>
+              <button id="gifSelectButton" class="text-button" type="button">ファイルを選ぶ</button>
+              <small>アニメーションPNGのみ対応</small>
+            </div>
+            <div id="gifLoaded" class="gif-loaded" hidden>
+              <div class="gif-preview checkerboard"><img id="gifPreview" alt="選択したAPNGのプレビュー" /></div>
+              <div class="gif-file-info">
+                <span class="file-type">APNG</span>
+                <div><strong id="gifFileName"></strong><small id="gifFileMeta"></small></div>
+                <button id="gifResetButton" class="quiet-button" type="button">選び直す</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="gif-convert-panel">
+            <span class="step">03</span>
+            <h3>GIFとして書き出す</h3>
+            <p>フレーム数と表示時間をAPNGから読み取り、繰り返し再生するGIFを作成します。</p>
+            <dl class="gif-facts">
+              <div><dt>FRAME</dt><dd id="gifFrameCount">—</dd></div>
+              <div><dt>SIZE</dt><dd id="gifDimensions">—</dd></div>
+              <div><dt>DURATION</dt><dd id="gifDuration">—</dd></div>
+            </dl>
+            <button id="gifConvertButton" class="convert-button" type="button" disabled>
+              <span id="gifConvertLabel">GIFに変換する</span>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+            </button>
+            <p id="gifMessage" class="message" role="status" aria-live="polite">APNGを追加してください</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="privacy">
+        <div class="privacy-icon" aria-hidden="true">⌁</div>
+        <div><h2>画像は、あなたの端末から出ません。</h2><p>変換処理はすべてブラウザ内で行われます。サーバーへのアップロードはありません。</p></div>
+      </section>
+    </main>
+
+    <div id="downloadModal" class="download-modal" role="dialog" aria-modal="true" aria-labelledby="downloadTitle" hidden>
+      <button class="download-backdrop" type="button" aria-label="ポップアップを閉じる"></button>
+      <div class="download-card">
+        <button id="downloadCloseButton" class="download-close" type="button" aria-label="閉じる">×</button>
+        <div class="download-check" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none"><path d="m14 24 7 7 14-15" /></svg>
+        </div>
+        <p class="eyebrow">DOWNLOAD COMPLETE</p>
+        <h2 id="downloadTitle">ダウンロードできました！</h2>
+        <p id="downloadFileName" class="download-file-name"></p>
+        <button id="downloadDoneButton" class="modal-button" type="button">OK</button>
+      </div>
+    </div>
+
+    <footer><span>ぱらぱらPNG</span><small>MAKE IMAGES MOVE.</small></footer>
+    <script src="app.js?v=5"></script>
+  </body>
+</html>
