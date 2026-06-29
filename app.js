@@ -471,10 +471,11 @@ function medianCutColors(points, limit) {
     if (bestIndex < 0) break;
     const box = boxes[bestIndex].slice().sort((a, b) => a[bestChannel] - b[bestChannel]);
     const total = box.reduce((sum, point) => sum + point.count, 0);
-    let running = 0, split = 1;
-    for (; split < box.length; split++) {
-      running += box[split - 1].count;
-      if (running >= total / 2) break;
+    let running = 0, split = 1, closest = Infinity;
+    for (let candidate = 1; candidate < box.length; candidate++) {
+      running += box[candidate - 1].count;
+      const distance = Math.abs(total / 2 - running);
+      if (distance < closest) { closest = distance; split = candidate; }
     }
     boxes.splice(bestIndex, 1, box.slice(0, split), box.slice(split));
   }
