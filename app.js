@@ -284,12 +284,11 @@ async function convertApngToGif() {
 }
 
 async function encodeGifFromApng(source) {
-  const palette = makeGifPalette();
   const parts = [
     new TextEncoder().encode('GIF89a'),
     le16(source.width), le16(source.height),
     new Uint8Array([0xf7, 0x00, 0x00]),
-    palette,
+    new Uint8Array(256 * 3),
     new Uint8Array([0x21,0xff,0x0b,0x4e,0x45,0x54,0x53,0x43,0x41,0x50,0x45,0x32,0x2e,0x30,0x03,0x01,0x00,0x00,0x00])
   ];
   const canvas = document.createElement('canvas');
@@ -303,12 +302,12 @@ async function encodeGifFromApng(source) {
       const image = await decodePngFrame(makeFramePng(source.parsed, frame));
       ctx.drawImage(image, frame.x, frame.y, frame.width, frame.height);
       const rgba = ctx.getImageData(0, 0, source.width, source.height).data;
-      const indexed = pixelsToGifIndices(rgba);
+      const quantized = quantizeGifFrame(rgba);
       const delayCs = Math.min(65535, Math.max(2, Math.round(source.delays[index] / 10)));
       parts.push(
-        new Uint8Array([0x21,0xf9,0x04,0x09]), le16(delayCs), new Uint8Array([0x00,0x00]),
-        new Uint8Array([0x2c]), le16(0), le16(0), le16(source.width), le16(source.height), new Uint8Array([0x00,0x08]),
-        gifSubBlocks(gifLzw(indexed, 8))
+        new Uint8Array([0x21,0xf9,0x04,quantized.hasTransparency ? 0x09 : 0x08]), le16(delayCs), new Uint8Array([0x00,0x00]),
+        new Uint8Array([0x2c]), le16(0), le16(0), le16(source.width), le16(source.height), new Uint8Array([0x87]),
+        quantized.palette, new Uint8Array([0x08]), gifSubBlocks(gifLzw(quantized.indices, 8))
       );
       if (typeof image.close === 'function') image.close();
       if (frame.dispose === 1) ctx.clearRect(frame.x, frame.y, frame.width, frame.height);
@@ -382,27 +381,121 @@ async function decodePngFrame(blob) {
   });
 }
 
-function makeGifPalette() {
-  const palette = new Uint8Array(256 * 3);
-  for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) {
-    const index = 1 + r * 36 + g * 6 + b;
-    palette[index * 3] = Math.round(r * 255 / 5);
-    palette[index * 3 + 1] = Math.round(g * 255 / 5);
-    palette[index * 3 + 2] = Math.round(b * 255 / 5);
+function quantizeGifFrame(rgba) {
+  let hasTransparency = false;
+  for (let source = 3; source < rgba.length; source += 4) {
+    if (rgba[source] < 128) { hasTransparency = true; break; }
   }
-  return palette;
-}
+  const colorLimit = hasTransparency ? 255 : 256;
+  const paletteOffset = hasTransparency ? 1 : 0;
+  const exactColors = new Map();
+  let needsQuantization = false;
+  for (let source = 0; source < rgba.length; source += 4) {
+    if (rgba[source + 3] < 128) continue;
+    const key = (rgba[source] << 16) | (rgba[source + 1] << 8) | rgba[source + 2];
+    if (exactColors.has(key)) exactColors.set(key, exactColors.get(key) + 1);
+    else if (exactColors.size < colorLimit) exactColors.set(key, 1);
+    else { needsQuantization = true; break; }
+  }
 
-function pixelsToGifIndices(rgba) {
+  if (!needsQuantization) {
+    const colors = [...exactColors.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => ({
+      r: (key >>> 16) & 255, g: (key >>> 8) & 255, b: key & 255
+    }));
+    const palette = colorsToGifPalette(colors, paletteOffset);
+    const colorIndexes = new Map(colors.map((color, index) => [
+      (color.r << 16) | (color.g << 8) | color.b, index + paletteOffset
+    ]));
+    const indices = new Uint8Array(rgba.length / 4);
+    for (let source = 0, target = 0; source < rgba.length; source += 4, target++) {
+      if (rgba[source + 3] < 128) continue;
+      const key = (rgba[source] << 16) | (rgba[source + 1] << 8) | rgba[source + 2];
+      indices[target] = colorIndexes.get(key);
+    }
+    return { palette, indices, hasTransparency };
+  }
+
+  const bins = new Map();
+  for (let source = 0; source < rgba.length; source += 4) {
+    if (rgba[source + 3] < 128) continue;
+    const r = rgba[source], g = rgba[source + 1], b = rgba[source + 2];
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    const bin = bins.get(key);
+    if (bin) { bin.r += r; bin.g += g; bin.b += b; bin.count++; }
+    else bins.set(key, { r, g, b, count: 1 });
+  }
+  const points = [...bins.values()].map(bin => ({
+    r: bin.r / bin.count, g: bin.g / bin.count, b: bin.b / bin.count, count: bin.count
+  }));
+  const colors = medianCutColors(points, colorLimit);
+  const palette = colorsToGifPalette(colors, paletteOffset);
+  const binIndexes = new Map();
+  for (const [key, bin] of bins) {
+    binIndexes.set(key, nearestPaletteIndex(bin.r / bin.count, bin.g / bin.count, bin.b / bin.count, colors) + paletteOffset);
+  }
   const indexed = new Uint8Array(rgba.length / 4);
   for (let source = 0, target = 0; source < rgba.length; source += 4, target++) {
     if (rgba[source + 3] < 128) { indexed[target] = 0; continue; }
-    const r = Math.round(rgba[source] * 5 / 255);
-    const g = Math.round(rgba[source + 1] * 5 / 255);
-    const b = Math.round(rgba[source + 2] * 5 / 255);
-    indexed[target] = 1 + r * 36 + g * 6 + b;
+    const key = ((rgba[source] >> 3) << 10) | ((rgba[source + 1] >> 3) << 5) | (rgba[source + 2] >> 3);
+    indexed[target] = binIndexes.get(key);
   }
-  return indexed;
+  return { palette, indices: indexed, hasTransparency };
+}
+
+function colorsToGifPalette(colors, offset) {
+  const palette = new Uint8Array(256 * 3);
+  colors.forEach((color, index) => {
+    const position = (index + offset) * 3;
+    palette[position] = Math.round(color.r);
+    palette[position + 1] = Math.round(color.g);
+    palette[position + 2] = Math.round(color.b);
+  });
+  return palette;
+}
+
+function medianCutColors(points, limit) {
+  const boxes = [points];
+  while (boxes.length < limit) {
+    let bestIndex = -1, bestScore = -1, bestChannel = 'r';
+    boxes.forEach((box, index) => {
+      if (box.length < 2) return;
+      const ranges = ['r','g','b'].map(channel => {
+        let min = Infinity, max = -Infinity;
+        box.forEach(point => { min = Math.min(min, point[channel]); max = Math.max(max, point[channel]); });
+        return { channel, range: max - min };
+      }).sort((a, b) => b.range - a.range);
+      const population = box.reduce((sum, point) => sum + point.count, 0);
+      const score = ranges[0].range * population;
+      if (score > bestScore) { bestIndex = index; bestScore = score; bestChannel = ranges[0].channel; }
+    });
+    if (bestIndex < 0) break;
+    const box = boxes[bestIndex].slice().sort((a, b) => a[bestChannel] - b[bestChannel]);
+    const total = box.reduce((sum, point) => sum + point.count, 0);
+    let running = 0, split = 1;
+    for (; split < box.length; split++) {
+      running += box[split - 1].count;
+      if (running >= total / 2) break;
+    }
+    boxes.splice(bestIndex, 1, box.slice(0, split), box.slice(split));
+  }
+  return boxes.map(box => {
+    const total = box.reduce((sum, point) => sum + point.count, 0);
+    return {
+      r: box.reduce((sum, point) => sum + point.r * point.count, 0) / total,
+      g: box.reduce((sum, point) => sum + point.g * point.count, 0) / total,
+      b: box.reduce((sum, point) => sum + point.b * point.count, 0) / total
+    };
+  });
+}
+
+function nearestPaletteIndex(r, g, b, colors) {
+  let best = 0, bestDistance = Infinity;
+  colors.forEach((color, index) => {
+    const dr = r - color.r, dg = g - color.g, db = b - color.b;
+    const distance = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+    if (distance < bestDistance) { best = index; bestDistance = distance; }
+  });
+  return best;
 }
 
 function gifLzw(indices, minimumCodeSize) {
